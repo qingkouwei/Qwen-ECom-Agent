@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>电商竞品爆款全维拆解与重构助手</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap');
+:root{
+  --bg-primary:#0a0a1a;--bg-glass:rgba(255,255,255,0.04);--bg-glass-hover:rgba(255,255,255,0.08);
+  --border-glass:rgba(255,255,255,0.08);--text-primary:#f0f0f5;--text-secondary:#8888a0;
+  --accent:#6366f1;--accent-glow:rgba(99,102,241,0.3);--success:#22c55e;--warning:#f59e0b;
+  --danger:#ef4444;--radius:16px;--radius-sm:10px;
+}
+html,body{height:100%;font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg-primary);color:var(--text-primary);overflow:hidden}
+body{background:radial-gradient(ellipse at 20% 50%,rgba(99,102,241,0.08) 0%,transparent 50%),radial-gradient(ellipse at 80% 20%,rgba(139,92,246,0.06) 0%,transparent 50%),var(--bg-primary)}
+#app{display:flex;height:100vh;width:100vw}
+
+/* 滚动条 */
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:4px}
+
+/* 左侧边栏 */
+.sidebar{width:320px;min-width:320px;height:100vh;border-right:1px solid var(--border-glass);display:flex;flex-direction:column;background:rgba(10,10,30,0.6);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px)}
+.sidebar-header{padding:24px;border-bottom:1px solid var(--border-glass)}
+.logo{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.logo-icon{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,var(--accent),#8b5cf6);display:flex;align-items:center;justify-content:center;font-size:20px}
+.logo-text{font-size:16px;font-weight:700;letter-spacing:-0.02em}
+.logo-sub{font-size:11px;color:var(--text-secondary);margin-top:2px}
+
+/* 上传区 */
+.upload-zone{margin:20px;padding:28px 20px;border:2px dashed var(--border-glass);border-radius:var(--radius);text-align:center;cursor:pointer;transition:all .3s ease;position:relative;overflow:hidden}
+.upload-zone:hover,.upload-zone.drag-over{border-color:var(--accent);background:var(--accent-glow)}
+.upload-zone.drag-over{transform:scale(1.02)}
+.upload-icon{font-size:36px;margin-bottom:10px;opacity:0.7}
+.upload-text{font-size:13px;color:var(--text-secondary);line-height:1.6}
+.upload-text strong{color:var(--text-primary);font-weight:600}
+.upload-input{display:none}
+
+/* 设置区 */
+.settings-section{padding:16px 20px;border-bottom:1px solid var(--border-glass)}
+.settings-title{font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:10px;font-weight:600}
+.api-key-input{width:100%;padding:10px 14px;background:var(--bg-glass);border:1px solid var(--border-glass);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;outline:none;transition:border-color .2s}
+.api-key-input:focus{border-color:var(--accent)}
+.api-key-input::placeholder{color:rgba(136,136,160,0.5)}
+.save-btn{margin-top:8px;width:100%;padding:8px;background:var(--accent);color:#fff;border:none;border-radius:var(--radius-sm);font-size:12px;font-weight:600;cursor:pointer;transition:opacity .2s}
+.save-btn:hover{opacity:0.85}
+
+/* 项目列表 */
+.project-list{flex:1;overflow-y:auto;padding:12px}
+.project-list-title{font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:10px;font-weight:600;padding:0 8px}
+.project-item{padding:14px 16px;border-radius:var(--radius-sm);cursor:pointer;transition:all .2s;margin-bottom:6px;border:1px solid transparent}
+.project-item:hover{background:var(--bg-glass-hover)}
+.project-item.active{background:var(--bg-glass-hover);border-color:var(--accent)}
+.project-item-name{font-size:13px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.project-item-meta{font-size:11px;color:var(--text-secondary);display:flex;gap:12px}
+.project-item-badges{display:flex;gap:6px;margin-top:6px}
+.badge{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:500}
+.badge-review{background:rgba(99,102,241,0.15);color:#818cf8}
+.badge-analysis{background:rgba(34,197,94,0.15);color:#4ade80}
+.badge-image{background:rgba(245,158,11,0.15);color:#fbbf24}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-secondary);font-size:13px}
+
+/* 右侧主区域 */
+.main-content{flex:1;overflow-y:auto;padding:32px 40px}
+.main-header{margin-bottom:32px}
+.main-title{font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px}
+.main-subtitle{font-size:13px;color:var(--text-secondary)}
+
+/* 卡片 */
+.card{background:var(--bg-glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--border-glass);border-radius:var(--radius);padding:28px;margin-bottom:24px;transition:all .3s}
+.card:hover{border-color:rgba(255,255,255,0.12);background:rgba(255,255,255,0.06)}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.card-title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:10px}
+.card-title .emoji{font-size:20px}
+.card-action{padding:8px 16px;border-radius:var(--radius-sm);border:1px solid var(--border-glass);background:var(--bg-glass);color:var(--text-primary);font-size:12px;cursor:pointer;transition:all .2s;font-weight:500}
+.card-action:hover{background:var(--bg-glass-hover);border-color:var(--accent)}
+.card-action:disabled{opacity:0.4;cursor:not-allowed}
+.card-action.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.card-action.primary:hover{opacity:0.85}
+
+/* 痛点雷达 */
+.pain-points-grid{display:grid;gap:16px}
+.pain-point-item{display:flex;align-items:center;gap:16px;padding:16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.04)}
+.pain-point-icon{font-size:28px;width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--bg-glass);border-radius:12px;flex-shrink:0}
+.pain-point-info{flex:1}
+.pain-point-label{font-size:14px;font-weight:600;margin-bottom:4px}
+.pain-point-detail{font-size:12px;color:var(--text-secondary);line-height:1.5}
+.pain-point-bar{height:6px;background:rgba(255,255,255,0.06);border-radius:3px;margin-top:8px;overflow:hidden}
+.pain-point-bar-fill{height:100%;border-radius:3px;transition:width 1s ease}
+.pain-point-pct{font-size:20px;font-weight:700;color:var(--accent);min-width:60px;text-align:right}
+
+/* 晒图视觉洞察 */
+.insight-gallery{display:flex;gap:10px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px}
+.insight-gallery img{width:96px;height:96px;object-fit:cover;border-radius:10px;border:1px solid var(--border-glass);flex-shrink:0}
+.insight-list{display:grid;gap:10px}
+.insight-item{display:flex;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.04);align-items:flex-start}
+.insight-badge{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;flex-shrink:0;white-space:nowrap;margin-top:2px}
+.badge-defect{background:rgba(239,68,68,0.15);color:#f87171}
+.badge-positive{background:rgba(34,197,94,0.15);color:#4ade80}
+.badge-scene{background:rgba(59,130,246,0.15);color:#60a5fa}
+.insight-label{font-size:13px;font-weight:600;margin-bottom:3px}
+.insight-detail{font-size:12px;color:var(--text-secondary);line-height:1.6}
+
+/* 文案区 */
+.copywriting-section{}
+.cw-title-box{padding:20px;background:linear-gradient(135deg,rgba(99,102,241,0.08),rgba(139,92,246,0.06));border-radius:var(--radius-sm);border:1px solid rgba(99,102,241,0.15);margin-bottom:16px}
+.cw-title-label{font-size:11px;color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px}
+.cw-title-text{font-size:18px;font-weight:700;line-height:1.5}
+.cw-sp-list{display:grid;gap:10px;margin-bottom:16px}
+.cw-sp-item{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.04)}
+.cw-sp-num{width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.cw-sp-text{font-size:13px;line-height:1.6}
+.cw-desc{font-size:13px;color:var(--text-secondary);line-height:1.7;padding:16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm)}
+
+/* 生图区 */
+.image-gen-section{}
+.prompt-box{padding:16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.04);margin-bottom:16px}
+.prompt-label{font-size:11px;color:var(--text-secondary);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px}
+.prompt-text{font-size:13px;color:var(--text-secondary);line-height:1.6;font-style:italic}
+.gen-result{margin-top:20px;text-align:center}
+.gen-result img{max-width:100%;max-height:480px;border-radius:var(--radius);border:1px solid var(--border-glass)}
+
+/* 加载动画 */
+.loading-overlay{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:60px;gap:16px}
+.spinner{width:40px;height:40px;border:3px solid rgba(255,255,255,0.1);border-top-color:var(--accent);border-radius:50%;animation:spin 0.8s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-text{font-size:13px;color:var(--text-secondary)}
+
+/* Toast */
+.toast-container{position:fixed;top:24px;right:24px;z-index:9999;display:flex;flex-direction:column;gap:8px}
+.toast{padding:14px 20px;border-radius:var(--radius-sm);background:rgba(20,20,40,0.95);backdrop-filter:blur(20px);border:1px solid var(--border-glass);font-size:13px;animation:slideIn .3s ease;max-width:360px}
+.toast.success{border-color:rgba(34,197,94,0.3)}
+.toast.error{border-color:rgba(239,68,68,0.3)}
+@keyframes slideIn{from{opacity:0;transform:translateX(20px)}to{opacity:1;transform:translateX(0)}}
+
+/* 空状态 */
+.welcome-state{display:flex;flex-direction:column;align-items:center;justify-content:center;height:100%;text-align:center;gap:16px;opacity:0.6}
+.welcome-icon{font-size:64px}
+.welcome-title{font-size:20px;font-weight:700}
+.welcome-desc{font-size:14px;color:var(--text-secondary);max-width:400px;line-height:1.7}
+
+/* 复制成功 */
+.copy-toast{position:fixed;bottom:40px;left:50%;transform:translateX(-50%);padding:10px 24px;background:var(--success);color:#fff;border-radius:20px;font-size:13px;font-weight:600;animation:fadeUp .3s ease}
+@keyframes fadeUp{from{opacity:0;transform:translate(-50%,10px)}to{opacity:1;transform:translate(-50%,0)}}
+
+
+</style>
+</head>
+<body>
+<div id="app">
+  <!-- Toast 通知 -->
+  <div class="toast-container">
+    <div v-for="(t,i) in toasts" :key="i" :class="['toast',t.type]">{{ t.msg }}</div>
+  </div>
+  <!-- 复制成功 -->
+  <div v-if="showCopyToast" class="copy-toast">✅ 已复制到剪贴板</div>
+
+  <!-- 左侧边栏 -->
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-icon">🔍</div>
+        <div>
+          <div class="logo-text">竞品爆款拆解助手</div>
+          <div class="logo-sub">Qwen3.8-Max · 通义万相</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 上传区 -->
+    <div class="upload-zone" :class="{'drag-over':isDragOver}"
+         @click="$refs.fileInput.click()"
+         @dragover.prevent="isDragOver=true"
+         @dragleave="isDragOver=false"
+         @drop.prevent="handleDrop($event)">
+      <div class="upload-icon">📤</div>
+      <div class="upload-text">
+        <strong>点击或拖拽上传</strong><br>
+        支持 .xlsx / .xls 竞品表格
+      </div>
+      <input ref="fileInput" class="upload-input" type="file" accept=".xlsx,.xls" @change="handleFileSelect">
+    </div>
+
+    <!-- API Key 设置 -->
+    <div class="settings-section">
+      <div class="settings-title">🔑 API Key 配置</div>
+      <input class="api-key-input" v-model="apiKey" type="password" placeholder="输入 DashScope API Key">
+      <button class="save-btn" @click="saveApiKey">保存配置</button>
+    </div>
+
+    <!-- 项目列表 -->
+    <div class="project-list">
+      <div class="project-list-title">📂 已上传分析项目</div>
+      <div v-if="projects.length===0" class="empty-state">暂无项目，请上传竞品表格</div>
+      <div v-for="p in projects" :key="p.id"
+           :class="['project-item',{active:currentProjectId===p.id}]"
+           @click="selectProject(p.id)">
+        <div class="project-item-name">{{ p.name }}</div>
+        <div class="project-item-meta">
+          <span>📝 {{ p.reviewCount }} 条评论</span>
+          <span>🖼 {{ p.imageCount }} 张图</span>
+        </div>
+        <div class="project-item-badges">
+          <span class="badge badge-review">已上传</span>
+          <span v-if="p.hasAnalysis" class="badge badge-analysis">已分析</span>
+          <span v-if="p.hasImage" class="badge badge-image">已生图</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 右侧主区域 -->
+  <div class="main-content">
+    <!-- 欢迎状态 -->
+    <div v-if="!currentProject" class="welcome-state">
+      <div class="welcome-icon">📊</div>
+      <div class="welcome-title">欢迎使用竞品爆款拆解助手</div>
+      <div class="welcome-desc">
+        上传竞品 Excel 表格，AI 将自动提取评论数据，深度分析质量痛点、生成合规爆款文案，并一键调用通义万相生成全新商品主图。
+      </div>
+    </div>
+
+    <!-- 项目详情 -->
+    <template v-if="currentProject">
+      <div class="main-header">
+        <div class="main-title">{{ currentProject.name }}</div>
+        <div class="main-subtitle">
+          共 {{ currentProject.reviewCount }} 条评论 · {{ currentProject.imageCount }} 张买家晒图
+          <span v-if="currentProject.uploadTime"> · {{ formatDate(currentProject.uploadTime) }}</span>
+        </div>
+      </div>
+
+      <!-- 分析按钮 -->
+      <div v-if="!currentProject.analysisResult && !analyzing" style="margin-bottom:24px;text-align:center">
+        <button class="card-action primary" style="padding:14px 40px;font-size:14px;border-radius:var(--radius)"
+                @click="analyzeProject">
+          🚀 开始 AI 全维拆解分析
+        </button>
+      </div>
+
+      <!-- 分析中 -->
+      <div v-if="analyzing" class="card">
+        <div class="loading-overlay">
+          <div class="spinner"></div>
+          <div class="loading-text">
+            {{ currentProject.imageCount > 0 ? 'Qwen3.8-Max 正在进行全维度深度分析，同步识别买家晒图中的实物细节…' : 'Qwen3.8-Max 正在进行全维度深度分析…' }}
+          </div>
+        </div>
+      </div>
+
+      <template v-if="currentProject.analysisResult">
+        <!-- 1. 竞品痛点分布雷达 -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="emoji">📊</span> 竞品痛点分布雷达</div>
+          </div>
+          <div class="pain-points-grid">
+            <div v-for="(pp,i) in painPoints" :key="i" class="pain-point-item">
+              <div class="pain-point-icon">{{ pp.icon || '🔍' }}</div>
+              <div class="pain-point-info">
+                <div class="pain-point-label">{{ pp.label }}</div>
+                <div class="pain-point-detail">{{ pp.detail }}</div>
+                <div class="pain-point-bar">
+                  <div class="pain-point-bar-fill" :style="{width:pp.percentage+'%',background:barColor(i)}"></div>
+                </div>
+              </div>
+              <div class="pain-point-pct">{{ pp.percentage }}%</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 2. 买家晒图视觉洞察 -->
+        <div class="card" v-if="currentProject.imageCount > 0">
+          <div class="card-header">
+            <div class="card-title"><span class="emoji">🖼️</span> 买家晒图视觉洞察</div>
+            <span style="font-size:11px;color:var(--text-secondary)">AI 已将晒图与评论文本交叉验证</span>
+          </div>
+          <div v-if="projectImages.length" class="insight-gallery">
+            <img v-for="(url,i) in projectImages" :key="i" :src="url" alt="买家晒图" loading="lazy"
+                 @error="e => e.target.style.display='none'">
+          </div>
+          <div v-if="imageInsights.findings && imageInsights.findings.length" class="insight-list">
+            <div v-for="(f,i) in imageInsights.findings" :key="i" class="insight-item">
+              <span :class="['insight-badge','badge-'+(f.type||'defect')]">{{ insightTypeLabel(f.type) }}</span>
+              <div>
+                <div class="insight-label">{{ f.label }}</div>
+                <div class="insight-detail">{{ f.detail }}</div>
+              </div>
+            </div>
+          </div>
+          <div v-else class="empty-state" style="padding:20px">本次分析未从晒图中提取到有效发现</div>
+        </div>
+
+        <!-- 3. 重构爆款文案 -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="emoji">📝</span> 重构爆款文案</div>
+            <button class="card-action" @click="copyAllCopywriting">📋 一键复制全部文案</button>
+          </div>
+          <div class="copywriting-section">
+            <div class="cw-title-box">
+              <div class="cw-title-label">🔥 爆款标题</div>
+              <div class="cw-title-text">{{ copywriting.title }}</div>
+            </div>
+            <div class="cw-sp-list">
+              <div v-for="(sp,i) in copywriting.sellingPoints" :key="i" class="cw-sp-item">
+                <div class="cw-sp-num">{{ i+1 }}</div>
+                <div class="cw-sp-text">{{ sp }}</div>
+              </div>
+            </div>
+            <div class="cw-desc">{{ copywriting.description }}</div>
+          </div>
+        </div>
+
+        <!-- 4. 通义万相一键生图 -->
+        <div class="card">
+          <div class="card-header">
+            <div class="card-title"><span class="emoji">🎨</span> 通义万相一键生图</div>
+          </div>
+          <div class="image-gen-section">
+            <div class="prompt-box">
+              <div class="prompt-label">🖌 生图提示词</div>
+              <div class="prompt-text">{{ imagePrompt }}</div>
+            </div>
+            <div v-if="!generating && !currentProject.generatedImage" style="text-align:center">
+              <button class="card-action primary" style="padding:12px 32px;font-size:13px"
+                      @click="generateImage">
+                🎨 调用通义万相生成新主图
+              </button>
+            </div>
+            <div v-if="generating" class="loading-overlay">
+              <div class="spinner"></div>
+              <div class="loading-text">通义万相正在渲染生成中…</div>
+            </div>
+            <div v-if="currentProject.generatedImage" class="gen-result">
+              <img :src="currentProject.generatedImage" alt="生成的商品主图">
+              <div style="margin-top:12px">
+                <button class="card-action" @click="generateImage" style="margin-right:8px">🔄 重新生成</button>
+                <a :href="currentProject.generatedImage" target="_blank" class="card-action" style="text-decoration:none;display:inline-block">🔗 查看原图</a>
+              </div>
+            </div>
+          </div>
+        </div>
+      </template>
+    </template>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted, nextTick } = Vue;
+
+createApp({
+  setup() {
+    const apiKey = ref('');
+    const projects = ref([]);
+    const currentProjectId = ref(null);
+    const isDragOver = ref(false);
+    const analyzing = ref(false);
+    const generating = ref(false);
+    const toasts = ref([]);
+    const showCopyToast = ref(false);
+
+    const currentProject = computed(() => {
+      if (!currentProjectId.value) return null;
+      return projects.value.find(p => p.id === currentProjectId.value) || null;
+    });
+
+    const painPoints = computed(() => currentProject.value?.analysisResult?.painPoints || []);
+    const imageInsights = computed(() => currentProject.value?.analysisResult?.imageInsights || { findings: [] });
+    const projectImages = computed(() => currentProject.value?.images || []);
+    function insightTypeLabel(t) {
+      return { defect: '缺陷证据', positive: '正面信号', scene: '使用场景' }[t] || '发现';
+    }
+    const copywriting = computed(() => currentProject.value?.analysisResult?.copywriting || {
+      title: '', sellingPoints: [], description: ''
+    });
+    const imagePrompt = computed(() => currentProject.value?.analysisResult?.imagePrompt || '');
+
+    function toast(msg, type = 'success') {
+      toasts.value.push({ msg, type });
+      setTimeout(() => toasts.value.shift(), 3500);
+    }
+
+    function formatDate(iso) {
+      try {
+        const d = new Date(iso);
+        return d.toLocaleDateString('zh-CN') + ' ' + d.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' });
+      } catch { return iso; }
+    }
+
+    function barColor(i) {
+      const colors = ['#6366f1', '#8b5cf6', '#a78bfa', '#c4b5fd'];
+      return colors[i % colors.length];
+    }
+
+    // 加载项目列表（合并保留本地已有的分析结果与生图结果）
+    async function loadProjects() {
+      try {
+        const res = await fetch('/api/projects');
+        const data = await res.json();
+        projects.value = data.projects.map(p => {
+          const local = projects.value.find(x => x.id === p.id);
+          return { ...p, analysisResult: local?.analysisResult || null, generatedImage: local?.generatedImage || null };
+        });
+      } catch (e) { console.error(e); }
+    }
+
+    // 拉取单个项目完整详情并回填到本地列表
+    async function refreshProjectDetail(id) {
+      try {
+        const res = await fetch(`/api/project/${id}`);
+        const data = await res.json();
+        if (data.id) {
+          const idx = projects.value.findIndex(p => p.id === id);
+          if (idx > -1) {
+            projects.value[idx] = { ...projects.value[idx], ...data };
+          } else {
+            projects.value.push(data);
+          }
+        }
+      } catch (e) { console.error(e); }
+    }
+
+    // 加载配置
+    async function loadConfig() {
+      try {
+        const res = await fetch('/api/config');
+        const data = await res.json();
+        if (data.hasKey) toast('API Key 已配置', 'success');
+      } catch {}
+    }
+
+    async function saveApiKey() {
+      if (!apiKey.value.trim()) { toast('请输入 API Key', 'error'); return; }
+      try {
+        await fetch('/api/config', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ apiKey: apiKey.value.trim() })
+        });
+        toast('API Key 已保存', 'success');
+      } catch { toast('保存失败', 'error'); }
+    }
+
+    function selectProject(id) {
+      currentProjectId.value = id;
+      // 本地无完整分析数据时从服务端拉取
+      const p = projects.value.find(x => x.id === id);
+      if (p && (p.hasAnalysis || p.hasImage) && !p.analysisResult && !p.generatedImage) {
+        refreshProjectDetail(id);
+      }
+    }
+
+    // 文件上传
+    async function uploadFile(file) {
+      if (!file) return;
+      const formData = new FormData();
+      formData.append('file', file);
+      try {
+        toast('正在上传并解析文件…');
+        const res = await fetch('/api/upload', { method: 'POST', body: formData });
+        const data = await res.json();
+        if (data.success) {
+          toast(`✅ 上传成功：${data.project.reviewCount} 条评论已提取`, 'success');
+          await loadProjects();
+          currentProjectId.value = data.project.id;
+        } else {
+          toast(data.error || '上传失败', 'error');
+        }
+      } catch (e) { toast('上传失败: ' + e.message, 'error'); }
+    }
+
+    function handleFileSelect(e) {
+      const file = e.target.files?.[0];
+      if (file) uploadFile(file);
+      e.target.value = '';
+    }
+
+    function handleDrop(e) {
+      isDragOver.value = false;
+      const file = e.dataTransfer?.files?.[0];
+      if (file) uploadFile(file);
+    }
+
+    // AI 分析
+    async function analyzeProject() {
+      if (!currentProjectId.value) return;
+      analyzing.value = true;
+      try {
+        const res = await fetch('/api/analyze', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: currentProjectId.value,
+            apiKey: apiKey.value.trim() || undefined
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          toast('🎉 全维拆解分析完成！', 'success');
+          // 回填最新分析结果，避免列表刷新覆盖
+          if (data.result) {
+            const p = projects.value.find(x => x.id === currentProjectId.value);
+            if (p) { p.analysisResult = data.result; p.hasAnalysis = true; }
+          }
+          await refreshProjectDetail(currentProjectId.value);
+        } else {
+          toast(data.error || '分析失败', 'error');
+        }
+      } catch (e) { toast('分析失败: ' + e.message, 'error'); }
+      finally { analyzing.value = false; }
+    }
+
+    // 生图
+    async function generateImage() {
+      if (!currentProjectId.value) return;
+      generating.value = true;
+      try {
+        const res = await fetch('/api/generate-image', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            projectId: currentProjectId.value,
+            apiKey: apiKey.value.trim() || undefined,
+            prompt: imagePrompt.value
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          toast('🎨 商品主图生成成功！', 'success');
+          const p = projects.value.find(x => x.id === currentProjectId.value);
+          if (p && data.imageUrl) { p.generatedImage = data.imageUrl; p.hasImage = true; }
+        } else {
+          toast(data.error || '生图失败', 'error');
+        }
+      } catch (e) { toast('生图失败: ' + e.message, 'error'); }
+      finally { generating.value = false; }
+    }
+
+    // 复制文案
+    async function copyAllCopywriting() {
+      const cw = copywriting.value;
+      const text = `【爆款标题】\n${cw.title}\n\n【三大核心卖点】\n${cw.sellingPoints.map((s,i) => `${i+1}. ${s}`).join('\n')}\n\n【商品描述】\n${cw.description}`;
+      try {
+        await navigator.clipboard.writeText(text);
+        showCopyToast.value = true;
+        setTimeout(() => showCopyToast.value = false, 2000);
+      } catch { toast('复制失败，请手动复制', 'error'); }
+    }
+
+    onMounted(() => {
+      loadProjects();
+      loadConfig();
+    });
+
+    return {
+      apiKey, projects, currentProjectId, currentProject, isDragOver,
+      analyzing, generating, toasts, showCopyToast,
+      painPoints, imageInsights, projectImages, insightTypeLabel, copywriting, imagePrompt,
+      toast, formatDate, barColor, saveApiKey, selectProject,
+      handleFileSelect, handleDrop, analyzeProject, generateImage, copyAllCopywriting
+    };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
