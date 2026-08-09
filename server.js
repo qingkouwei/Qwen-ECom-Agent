@@ -78,6 +78,90 @@ function calcCost(promptTokens, completionTokens) {
   return Math.round((promptTokens * 12 + completionTokens * 36) / 1e6 * 100) / 100;
 }
 
+// Seed 2.1 定价估算：pro 输入 ¥6/M 输出 ¥30/M；turbo 输入 ¥3/M 输出 ¥15/M
+function calcSeedCost(promptTokens, completionTokens, model) {
+  const isTurbo = /turbo/i.test(model || '');
+  const inputPrice = isTurbo ? 3 : 6;
+  const outputPrice = isTurbo ? 15 : 30;
+  return Math.round((promptTokens * inputPrice + completionTokens * outputPrice) / 1e6 * 100) / 100;
+}
+
+// ============================================================
+//  A/B 对比实验共用件：提示词构建器与结果解析器
+//  保证不同模型收到完全相同的任务输入，对比才公平
+// ============================================================
+function buildAnalysisPrompts(project) {
+  const reviewContext = project.reviews.join('\n---\n').slice(0, 6000);
+  const imageUrls = project.images
+    .filter(u => /^https?:\/\/.+/i.test(u))
+    .slice(0, 6);
+
+  const systemPrompt = `你是一位顶级电商运营专家和数据分析师。你需要根据用户提供的真实竞品评论数据，进行深度全维度拆解分析，帮助商家重构自己商品的标题、卖点与主图，从而提升运营效率和转化率。
+输出要求：
+1. 必须严格输出合法 JSON，不要包含 markdown 代码块标记。
+2. 所有文案必须100%规避广告法极限词（最、第一、顶级、绝对等），用合规替代词。
+3. 文案中需包含国标检测号（示例格式：GB/T 22844-2009）。
+4. 所有文本使用地道中文。
+5. 重构的标题与文案中禁止出现竞品品牌词、店铺名或商标，只能使用品类通用词与自身商品属性描述。
+
+【买家晒图信息提取要求】若附带了买家晒图，必须逐图提取以下四类信息，并汇总为独立条目输出到 imageInsights.findings：
+1. 实物品质状态：真实颜色（判断与商品页主图是否存在色差）、做工细节（车缝、接口、材质、安装质量）、破损/变形/磨损等缺陷证据 → type 用 defect；
+2. 真实使用场景：使用环境（室内/户外/特定场合）、实际用法、尺寸感知与搭配方式 → type 用 scene；
+3. 正面视觉信号：晒图中商品表现好的部分（颜值、氛围感、好评细节）→ type 用 positive；
+4. 图文一致性：晒图实物与商家宣传的差异点 → type 用 defect，并在 detail 中说明差异。
+要求：findings 输出 3-6 条最有价值的发现，必须与评论文本交叉验证；视觉上得到证实的缺陷应同时进入 painPoints 并给出更具体的 detail；positive 类发现应用于 copywriting 的卖点提炼；imagePrompt 必须基于晒图中识别到的真实商品品类与形态特征撰写。若未附带晒图，则不输出 imageInsights 字段。
+
+请输出如下 JSON 结构：
+{
+  "painPoints": [
+    { "label": "痛点名称", "percentage": 数字(0-100), "detail": "具体描述", "icon": "emoji" }
+  ],
+  "imageInsights": {
+    "findings": [
+      { "type": "defect 或 positive 或 scene", "label": "发现标签", "detail": "具体描述（含视觉证据）" }
+    ]
+  },
+  "copywriting": {
+    "title": "重构爆款标题（合规、高转化）",
+    "sellingPoints": ["卖点1", "卖点2", "卖点3"],
+    "description": "100字以内爆款描述"
+  },
+  "imagePrompt": "中文生图提示词，针对本商品品类，描述高品质电商主图的场景、光影、构图与质感细节（50-120字）"
+}`;
+
+  const userPrompt = `以下是一款竞品的真实买家评论数据${imageUrls.length ? '与买家晒图' : ''}，请进行全维度深度分析：
+
+【买家评论原文】
+${reviewContext}
+${imageUrls.length ? '\n【买家晒图】见附带的图片，请严格按照系统提示中的四类信息提取要求逐图分析，并与评论文本交叉验证后融入各模块输出。' : ''}
+
+请基于以上真实数据，输出完整的 JSON 分析结果。`;
+
+  return { systemPrompt, userPrompt, imageUrls, reviewCount: project.reviews.length };
+}
+
+// 解析模型返回的 JSON（容忍 markdown 包裹）
+function parseModelJson(raw) {
+  const content = String(raw || '').replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
+  try { return JSON.parse(content); } catch (e) { /* 尝试提取 */ }
+  const m = content.match(/\{[\s\S]*\}/);
+  if (m) {
+    try { return JSON.parse(m[0]); } catch (e) { /* 解析失败 */ }
+  }
+  throw new Error('大模型返回内容无法解析为 JSON');
+}
+
+// 产出质量指标（A/B 对比用：结果结构完整度）
+function qualityMetrics(r) {
+  return {
+    painPointCount: r?.painPoints?.length || 0,
+    findingsCount: r?.imageInsights?.findings?.length || 0,
+    sellingPointCount: r?.copywriting?.sellingPoints?.length || 0,
+    titleLength: (r?.copywriting?.title || '').length,
+    hasImagePrompt: !!r?.imagePrompt
+  };
+}
+
 // multer 配置
 const storage = multer.diskStorage({
   destination: uploadDir,
@@ -175,52 +259,8 @@ app.post('/api/analyze', async (req, res) => {
     const key = apiKey || process.env.DASHSCOPE_API_KEY;
     if (!key) return res.status(400).json({ error: '未配置 API Key，请在设置中填入您的 DashScope API Key' });
 
-    // 组装评论上下文（截取前 6000 字符防止超长）
-    const reviewContext = project.reviews.join('\n---\n').slice(0, 6000);
-    // 过滤出合法的公网图片链接（视觉模型会直接拉取 URL，无需后端下载）
-    const imageUrls = project.images
-      .filter(u => /^https?:\/\/.+/i.test(u))
-      .slice(0, 6);
-
-    const systemPrompt = `你是一位顶级电商运营专家和数据分析师。你需要根据用户提供的真实竞品评论数据，进行深度全维度拆解分析，帮助商家重构自己商品的标题、卖点与主图，从而提升运营效率和转化率。
-输出要求：
-1. 必须严格输出合法 JSON，不要包含 markdown 代码块标记。
-2. 所有文案必须100%规避广告法极限词（最、第一、顶级、绝对等），用合规替代词。
-3. 文案中需包含国标检测号（示例格式：GB/T 22844-2009）。
-4. 所有文本使用地道中文。
-
-【买家晒图信息提取要求】若附带了买家晒图，必须逐图提取以下四类信息，并汇总为独立条目输出到 imageInsights.findings：
-1. 实物品质状态：真实颜色（判断与商品页主图是否存在色差）、做工细节（车缝、接口、材质、安装质量）、破损/变形/磨损等缺陷证据 → type 用 defect；
-2. 真实使用场景：使用环境（室内/户外/特定场合）、实际用法、尺寸感知与搭配方式 → type 用 scene；
-3. 正面视觉信号：晒图中商品表现好的部分（颜值、氛围感、好评细节）→ type 用 positive；
-4. 图文一致性：晒图实物与商家宣传的差异点 → type 用 defect，并在 detail 中说明差异。
-要求：findings 输出 3-6 条最有价值的发现，必须与评论文本交叉验证；视觉上得到证实的缺陷应同时进入 painPoints 并给出更具体的 detail；positive 类发现应用于 copywriting 的卖点提炼；imagePrompt 必须基于晒图中识别到的真实商品品类与形态特征撰写。若未附带晒图，则不输出 imageInsights 字段。
-
-请输出如下 JSON 结构：
-{
-  "painPoints": [
-    { "label": "痛点名称", "percentage": 数字(0-100), "detail": "具体描述", "icon": "emoji" }
-  ],
-  "imageInsights": {
-    "findings": [
-      { "type": "defect 或 positive 或 scene", "label": "发现标签", "detail": "具体描述（含视觉证据）" }
-    ]
-  },
-  "copywriting": {
-    "title": "重构爆款标题（合规、高转化）",
-    "sellingPoints": ["卖点1", "卖点2", "卖点3"],
-    "description": "100字以内爆款描述"
-  },
-  "imagePrompt": "中文生图提示词，针对本商品品类，描述高品质电商主图的场景、光影、构图与质感细节（50-120字）"
-}`;
-
-    const userPrompt = `以下是一款竞品的真实买家评论数据${imageUrls.length ? '与买家晒图' : ''}，请进行全维度深度分析：
-
-【买家评论原文】
-${reviewContext}
-${imageUrls.length ? '\n【买家晒图】见附带的图片，请严格按照系统提示中的四类信息提取要求逐图分析，并与评论文本交叉验证后融入各模块输出。' : ''}
-
-请基于以上真实数据，输出完整的 JSON 分析结果。`;
+    // A/B 共用提示词构建器：与 Seed 2.1 对比实验使用完全相同的任务输入
+    const { systemPrompt, userPrompt, imageUrls, reviewCount } = buildAnalysisPrompts(project);
 
     // 统一调用入口：Qwen3.8-Max 原生支持视觉理解，评论文本与买家晒图 URL 直传，由模型端拉取图片
     const chatEndpoint = 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions';
@@ -272,33 +312,20 @@ ${imageUrls.length ? '\n【买家晒图】见附带的图片，请严格按照�
     }
 
     let content = response.data.choices?.[0]?.message?.content || '';
-    // 清理可能的 markdown 代码块包裹
-    content = content.replace(/```json\s*/g, '').replace(/```\s*/g, '').trim();
-
-    let analysisResult;
-    try {
-      analysisResult = JSON.parse(content);
-    } catch (e) {
-      // 尝试从文本中提取 JSON
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        analysisResult = JSON.parse(jsonMatch[0]);
-      } else {
-        throw new Error('大模型返回内容无法解析为 JSON');
-      }
-    }
+    const analysisResult = parseModelJson(content);
 
     project.analysisResult = analysisResult;
     saveProjectsToDisk();
 
-    // 记录分析调用统计：耗时、token 用量、成本估算
+    // 记录分析调用统计：耗时、token 用量、成本估算、产出质量指标
     const usage = response.data.usage || {};
     const seconds = Math.round((Date.now() - analyzeStartedAt) / 100) / 10;
     const cost = calcCost(usage.prompt_tokens || 0, usage.completion_tokens || 0);
-    logCtx = { project: project.name, projectId, reviewCount: project.reviews.length };
+    logCtx = { project: project.name, projectId, reviewCount };
     logStat({
-      type: 'analyze', action: 'Qwen3.8-Max 全维分析', status: 'success',
+      type: 'analyze', action: 'Qwen3.8-Max 全维分析', model: 'qwen3.8-max', status: 'success',
       ...logCtx,
+      thinking: 'off',
       multimodal: imageUrls.length > 0 && !degraded,
       imageCount: imageUrls.length,
       degraded,
@@ -306,10 +333,11 @@ ${imageUrls.length ? '\n【买家晒图】见附带的图片，请严格按照�
       promptTokens: usage.prompt_tokens || 0,
       completionTokens: usage.completion_tokens || 0,
       tokens: usage.total_tokens || 0,
-      cost
+      cost,
+      ...qualityMetrics(analysisResult)
     });
 
-    res.json({ success: true, result: analysisResult });
+    res.json({ success: true, result: analysisResult, stats: { seconds, promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, tokens: usage.total_tokens || 0, cost } });
   } catch (err) {
     console.error('分析失败:', err.response?.data || err.message);
     logStat({
@@ -320,6 +348,85 @@ ${imageUrls.length ? '\n【买家晒图】见附带的图片，请严格按照�
     });
     const errMsg = err.response?.data?.error?.message || err.message;
     res.status(500).json({ error: '分析调用失败: ' + errMsg });
+  }
+});
+
+// ============================================================
+//  A/B 对比实验：Seed 2.1 分析接口 — 与 Qwen3.8-Max 使用完全相同的提示词与任务输入
+// ============================================================
+app.post('/api/analyze-seed', async (req, res) => {
+  const startedAt = Date.now();
+  let logCtx = {};
+  const model = req.body.seedModel || process.env.SEED_MODEL || 'doubao-seed-2-1-pro-260628';
+  try {
+    const { projectId, apiKey } = req.body;
+    const project = projects.get(projectId);
+    if (!project) return res.status(404).json({ error: '项目不存在' });
+
+    const key = apiKey || process.env.ARK_API_KEY;
+    if (!key) return res.status(400).json({ error: '未配置火山方舟 API Key，请在页面设置中填入' });
+
+    // 同一套提示词构建器，保证 A/B 对比公平
+    const { systemPrompt, userPrompt, imageUrls, reviewCount } = buildAnalysisPrompts(project);
+    logCtx = { project: project.name, projectId, reviewCount };
+
+    const chatEndpoint = 'https://ark.cn-beijing.volces.com/api/v3/chat/completions';
+    const headers = { 'Authorization': `Bearer ${key}`, 'Content-Type': 'application/json' };
+
+    const userContent = imageUrls.length > 0
+      ? [
+          { type: 'text', text: userPrompt },
+          ...imageUrls.map(url => ({ type: 'image_url', image_url: { url } }))
+        ]
+      : userPrompt;
+
+    const response = await axios.post(chatEndpoint, {
+      model,
+      messages: [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: userContent }
+      ],
+      temperature: 0.7,
+      max_tokens: 4000,
+      // A/B 公平性：与 Qwen3.8-Max（enable_thinking: false）对齐，minimal = 关闭深度思考
+      reasoning_effort: 'minimal'
+    }, { headers, timeout: 180000 });
+
+    const content = response.data.choices?.[0]?.message?.content || '';
+    const analysisResult = parseModelJson(content);
+
+    // Seed 结果独立存储，不覆盖 Qwen 主分析结果，便于人工对照
+    project.seedResult = { model, result: analysisResult, analyzeTime: new Date().toISOString() };
+    saveProjectsToDisk();
+
+    const usage = response.data.usage || {};
+    const seconds = Math.round((Date.now() - startedAt) / 100) / 10;
+    const cost = calcSeedCost(usage.prompt_tokens || 0, usage.completion_tokens || 0, model);
+    logStat({
+      type: 'analyze-seed', action: 'Seed 2.1 对照分析', model, status: 'success',
+      ...logCtx,
+      thinking: 'off',
+      multimodal: imageUrls.length > 0,
+      imageCount: imageUrls.length,
+      seconds,
+      promptTokens: usage.prompt_tokens || 0,
+      completionTokens: usage.completion_tokens || 0,
+      tokens: usage.total_tokens || 0,
+      cost,
+      ...qualityMetrics(analysisResult)
+    });
+
+    res.json({ success: true, model, result: analysisResult, stats: { seconds, promptTokens: usage.prompt_tokens || 0, completionTokens: usage.completion_tokens || 0, tokens: usage.total_tokens || 0, cost } });
+  } catch (err) {
+    console.error('Seed 2.1 分析失败:', err.response?.data || err.message);
+    logStat({
+      type: 'analyze-seed', action: 'Seed 2.1 对照分析', model, status: 'fail',
+      ...logCtx,
+      error: err.response?.data?.error?.message || err.message,
+      seconds: Math.round((Date.now() - startedAt) / 100) / 10
+    });
+    const errMsg = err.response?.data?.error?.message || err.message;
+    res.status(500).json({ error: 'Seed 2.1 分析调用失败: ' + errMsg });
   }
 });
 
@@ -442,6 +549,7 @@ app.get('/api/projects', (req, res) => {
       reviewCount: p.reviews.length,
       imageCount: p.images.length,
       hasAnalysis: !!p.analysisResult,
+      hasSeed: !!p.seedResult,
       hasImage: !!p.generatedImage
     });
   });
@@ -459,6 +567,7 @@ app.get('/api/project/:id', (req, res) => {
     imageCount: project.images.length,
     images: project.images.slice(0, 6),
     analysisResult: project.analysisResult,
+    seedResult: project.seedResult,
     generatedImage: project.generatedImage
   });
 });

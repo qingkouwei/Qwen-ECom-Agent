@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seed 2.1 对照分析 · 电商竞品爆款全维拆解与重构助手</title>
+<script src="https://unpkg.com/vue@3/dist/vue.global.prod.js"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg-primary:#0a0a1a;--bg-glass:rgba(255,255,255,0.04);--bg-glass-hover:rgba(255,255,255,0.08);
+  --border-glass:rgba(255,255,255,0.08);--text-primary:#f0f0f5;--text-secondary:#8888a0;
+  --accent:#0ea5e9;--accent-glow:rgba(14,165,233,0.3);--success:#22c55e;--warning:#f59e0b;
+  --danger:#ef4444;--radius:16px;--radius-sm:10px;
+}
+html,body{height:100%;font-family:'Inter',system-ui,-apple-system,sans-serif;background:var(--bg-primary);color:var(--text-primary);overflow:hidden}
+body{background:radial-gradient(ellipse at 20% 50%,rgba(14,165,233,0.08) 0%,transparent 50%),radial-gradient(ellipse at 80% 20%,rgba(59,130,246,0.06) 0%,transparent 50%),var(--bg-primary)}
+#app{display:flex;height:100vh;width:100vw}
+::-webkit-scrollbar{width:4px}
+::-webkit-scrollbar-track{background:transparent}
+::-webkit-scrollbar-thumb{background:rgba(255,255,255,0.1);border-radius:4px}
+
+.sidebar{width:320px;min-width:320px;height:100vh;border-right:1px solid var(--border-glass);display:flex;flex-direction:column;background:rgba(10,10,30,0.6);backdrop-filter:blur(40px);-webkit-backdrop-filter:blur(40px)}
+.sidebar-header{padding:24px;border-bottom:1px solid var(--border-glass)}
+.logo{display:flex;align-items:center;gap:12px;margin-bottom:4px}
+.logo-icon{width:40px;height:40px;border-radius:12px;background:linear-gradient(135deg,#0ea5e9,#3b82f6);display:flex;align-items:center;justify-content:center;font-size:20px}
+.logo-text{font-size:16px;font-weight:700;letter-spacing:-0.02em}
+.logo-sub{font-size:11px;color:var(--text-secondary);margin-top:2px}
+
+.settings-section{padding:16px 20px;border-bottom:1px solid var(--border-glass)}
+.settings-title{font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:10px;font-weight:600}
+.api-key-input,.model-select{width:100%;padding:10px 14px;background:var(--bg-glass);border:1px solid var(--border-glass);border-radius:var(--radius-sm);color:var(--text-primary);font-size:12px;outline:none;transition:border-color .2s}
+.api-key-input:focus{border-color:var(--accent)}
+.api-key-input::placeholder{color:rgba(136,136,160,0.5)}
+.model-select{margin-top:8px;appearance:none}
+.model-select option{background:#0a0a1a}
+
+.project-list{flex:1;overflow-y:auto;padding:12px}
+.project-list-title{font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:var(--text-secondary);margin-bottom:10px;font-weight:600;padding:0 8px}
+.project-item{padding:14px 16px;border-radius:var(--radius-sm);cursor:pointer;transition:all .2s;margin-bottom:6px;border:1px solid transparent}
+.project-item:hover{background:var(--bg-glass-hover)}
+.project-item.active{background:var(--bg-glass-hover);border-color:var(--accent)}
+.project-item-name{font-size:13px;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.project-item-meta{font-size:11px;color:var(--text-secondary);display:flex;gap:12px}
+.project-item-badges{display:flex;gap:6px;margin-top:6px}
+.badge{font-size:10px;padding:2px 8px;border-radius:20px;font-weight:500}
+.badge-review{background:rgba(99,102,241,0.15);color:#818cf8}
+.badge-seed{background:rgba(14,165,233,0.15);color:#38bdf8}
+.badge-qwen{background:rgba(34,197,94,0.15);color:#4ade80}
+.empty-state{text-align:center;padding:40px 20px;color:var(--text-secondary);font-size:13px;line-height:1.8}
+.sidebar-footer{padding:14px 20px;border-top:1px solid var(--border-glass)}
+.back-link{display:block;text-align:center;font-size:12px;color:var(--text-secondary);text-decoration:none;padding:8px;border-radius:var(--radius-sm);border:1px solid var(--border-glass);transition:all .2s}
+.back-link:hover{color:var(--text-primary);border-color:var(--accent)}
+
+.main-content{flex:1;overflow-y:auto;padding:32px 40px}
+.main-header{margin-bottom:24px;display:flex;align-items:center;justify-content:space-between}
+.main-title{font-size:24px;font-weight:700;letter-spacing:-0.02em;margin-bottom:6px}
+.main-subtitle{font-size:13px;color:var(--text-secondary)}
+.experiment-tag{font-size:11px;padding:5px 14px;border-radius:20px;background:rgba(14,165,233,0.15);color:#38bdf8;font-weight:600;border:1px solid rgba(14,165,233,0.3)}
+
+.card{background:var(--bg-glass);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);border:1px solid var(--border-glass);border-radius:var(--radius);padding:28px;margin-bottom:24px;transition:all .3s}
+.card:hover{border-color:rgba(255,255,255,0.12);background:rgba(255,255,255,0.06)}
+.card-header{display:flex;align-items:center;justify-content:space-between;margin-bottom:20px}
+.card-title{font-size:16px;font-weight:700;display:flex;align-items:center;gap:10px}
+.card-title .emoji{font-size:20px}
+.card-action{padding:10px 22px;border-radius:var(--radius-sm);border:1px solid var(--border-glass);background:var(--bg-glass);color:var(--text-primary);font-size:13px;cursor:pointer;transition:all .2s;font-weight:600}
+.card-action.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.card-action.primary:hover{opacity:0.85}
+.card-action:disabled{opacity:0.4;cursor:not-allowed}
+
+/* 统计横幅 */
+.stats-banner{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:24px}
+.stat-box{background:var(--bg-glass);border:1px solid var(--border-glass);border-radius:var(--radius);padding:18px 20px;text-align:center}
+.stat-value{font-size:22px;font-weight:700;color:var(--accent)}
+.stat-label{font-size:11px;color:var(--text-secondary);margin-top:6px}
+
+.pain-points-grid{display:grid;gap:16px}
+.pain-point-item{display:flex;align-items:center;gap:16px;padding:16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.04)}
+.pain-point-icon{font-size:28px;width:48px;height:48px;display:flex;align-items:center;justify-content:center;background:var(--bg-glass);border-radius:12px;flex-shrink:0}
+.pain-point-info{flex:1}
+.pain-point-label{font-size:14px;font-weight:600;margin-bottom:4px}
+.pain-point-detail{font-size:12px;color:var(--text-secondary);line-height:1.5}
+.pain-point-bar{height:6px;background:rgba(255,255,255,0.06);border-radius:3px;margin-top:8px;overflow:hidden}
+.pain-point-bar-fill{height:100%;border-radius:3px;transition:width 1s ease}
+.pain-point-pct{font-size:20px;font-weight:700;color:var(--accent);min-width:60px;text-align:right}
+
+.insight-gallery{display:flex;gap:10px;margin-bottom:16px;overflow-x:auto;padding-bottom:4px}
+.insight-gallery img{width:96px;height:96px;object-fit:cover;border-radius:10px;border:1px solid var(--border-glass);flex-shrink:0}
+.insight-list{display:grid;gap:10px}
+.insight-item{display:flex;gap:12px;padding:12px 14px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.04);align-items:flex-start}
+.insight-badge{font-size:11px;padding:3px 10px;border-radius:20px;font-weight:600;flex-shrink:0;white-space:nowrap;margin-top:2px}
+.badge-defect{background:rgba(239,68,68,0.15);color:#f87171}
+.badge-positive{background:rgba(34,197,94,0.15);color:#4ade80}
+.badge-scene{background:rgba(59,130,246,0.15);color:#60a5fa}
+.insight-label{font-size:13px;font-weight:600;margin-bottom:3px}
+.insight-detail{font-size:12px;color:var(--text-secondary);line-height:1.6}
+
+.cw-title-box{padding:20px;background:linear-gradient(135deg,rgba(14,165,233,0.08),rgba(59,130,246,0.06));border-radius:var(--radius-sm);border:1px solid rgba(14,165,233,0.15);margin-bottom:16px}
+.cw-title-label{font-size:11px;color:var(--accent);font-weight:600;text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8px}
+.cw-title-text{font-size:18px;font-weight:700;line-height:1.5}
+.cw-sp-list{display:grid;gap:10px;margin-bottom:16px}
+.cw-sp-item{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm);border:1px solid rgba(255,255,255,0.04)}
+.cw-sp-num{width:28px;height:28px;border-radius:8px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;flex-shrink:0}
+.cw-sp-text{font-size:13px;line-height:1.6}
+.cw-desc{font-size:13px;color:var(--text-secondary);line-height:1.7;padding:16px;background:rgba(255,255,255,0.02);border-radius:var(--radius-sm)}
+.prompt-box{font-size:13px;line-height:1.8;padding:16px;background:rgba(14,165,233,0.05);border:1px dashed rgba(14,165,233,0.25);border-radius:var(--radius-sm);color:var(--text-primary)}
+
+.loading-state{text-align:center;padding:60px 20px;color:var(--text-secondary);font-size:13px}
+.spinner{width:36px;height:36px;border:3px solid rgba(255,255,255,0.08);border-top-color:var(--accent);border-radius:50%;margin:0 auto 16px;animation:spin 0.9s linear infinite}
+@keyframes spin{to{transform:rotate(360deg)}}
+.error-box{padding:16px 20px;background:rgba(239,68,68,0.08);border:1px solid rgba(239,68,68,0.25);border-radius:var(--radius-sm);color:#f87171;font-size:13px;margin-bottom:20px}
+</style>
+</head>
+<body>
+<div id="app">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-icon">🧪</div>
+        <div>
+          <div class="logo-text">Seed 2.1 对照分析</div>
+          <div class="logo-sub">A/B 模型对比实验 · 同任务同提示词</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <div class="settings-title">⚙️ 火山方舟配置</div>
+      <input class="api-key-input" type="password" v-model="apiKey" placeholder="填入火山方舟 API Key（ARK_API_KEY）">
+      <select class="model-select" v-model="seedModel">
+        <option value="doubao-seed-2-1-pro-260628">doubao-seed-2-1-pro-260628（输入 ¥6/M · 输出 ¥30/M）</option>
+        <option value="doubao-seed-2-1-turbo-260628">doubao-seed-2-1-turbo-260628（输入 ¥3/M · 输出 ¥15/M）</option>
+        <option value="__custom__">自定义模型 ID / 推理接入点 ID…</option>
+      </select>
+      <input v-if="seedModel === '__custom__'" class="api-key-input" style="margin-top:8px" v-model="customModel" placeholder="如 doubao-seed-2-1-pro-260628 或 ep-xxxx 接入点 ID">
+    </div>
+
+    <div class="project-list">
+      <div class="project-list-title">📁 项目列表</div>
+      <div v-if="projects.length === 0" class="empty-state">暂无项目<br>请先在主页上传竞品数据</div>
+      <div v-for="p in projects" :key="p.id" class="project-item" :class="{active: selectedId === p.id}" @click="selectProject(p)">
+        <div class="project-item-name">{{ p.name }}</div>
+        <div class="project-item-meta">
+          <span>💬 {{ p.reviewCount }} 条评论</span>
+          <span>🖼️ {{ p.imageCount }} 张晒图</span>
+        </div>
+        <div class="project-item-badges">
+          <span v-if="p.hasAnalysis" class="badge badge-qwen">Qwen3.8-Max ✓</span>
+          <span v-if="p.hasSeed" class="badge badge-seed">Seed 2.1 ✓</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="sidebar-footer">
+      <a class="back-link" href="/">← 返回主工作台（Qwen3.8-Max）</a>
+    </div>
+  </div>
+
+  <div class="main-content">
+    <div class="main-header">
+      <div>
+        <div class="main-title">{{ selectedProject ? selectedProject.name : '请选择项目' }}</div>
+        <div class="main-subtitle">使用与主工作台完全相同的提示词与数据输入，评估 Seed 2.1 的任务表现</div>
+      </div>
+      <div v-if="selectedProject" style="display:flex;gap:12px;align-items:center">
+        <span class="experiment-tag">A/B 实验组：{{ currentModel }}</span>
+        <button class="card-action primary" :disabled="analyzing" @click="analyze">
+          {{ analyzing ? '分析中…' : (seedResult ? '重新用 Seed 2.1 分析' : '开始 Seed 2.1 分析') }}
+        </button>
+      </div>
+    </div>
+
+    <div v-if="!selectedProject" class="empty-state" style="padding-top:120px">
+      👈 请先在左侧选择一个已上传数据的项目<br>
+      建议先在主工作台跑一次 Qwen3.8-Max 分析，再在本页跑 Seed 2.1，便于日志对比
+    </div>
+
+    <div v-else-if="analyzing" class="loading-state">
+      <div class="spinner"></div>
+      Seed 2.1 正在分析 {{ selectedProject.reviewCount }} 条评论与晒图…<br>
+      <span style="font-size:11px;margin-top:8px;display:inline-block">多模态任务通常需要 20-60 秒</span>
+    </div>
+
+    <div v-else-if="errorMsg" class="error-box">⚠️ {{ errorMsg }}</div>
+
+    <template v-else-if="seedResult">
+      <div class="stats-banner">
+        <div class="stat-box"><div class="stat-value">{{ stats.seconds }}s</div><div class="stat-label">端到端耗时</div></div>
+        <div class="stat-box"><div class="stat-value">{{ stats.tokens.toLocaleString() }}</div><div class="stat-label">总 Token（入 {{ stats.promptTokens.toLocaleString() }} / 出 {{ stats.completionTokens.toLocaleString() }}）</div></div>
+        <div class="stat-box"><div class="stat-value">¥{{ stats.cost }}</div><div class="stat-label">成本估算</div></div>
+        <div class="stat-box"><div class="stat-value">{{ (seedResult.painPoints || []).length + ((seedResult.imageInsights || {}).findings || []).length }}</div><div class="stat-label">产出条目数</div></div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="emoji">📊</span>竞品痛点分布雷达</div></div>
+        <div class="pain-points-grid">
+          <div v-for="p in seedResult.painPoints" :key="p.label" class="pain-point-item">
+            <div class="pain-point-icon">{{ p.icon }}</div>
+            <div class="pain-point-info">
+              <div class="pain-point-label">{{ p.label }}</div>
+              <div class="pain-point-detail">{{ p.detail }}</div>
+              <div class="pain-point-bar"><div class="pain-point-bar-fill" :style="{width: p.percentage + '%', background: 'linear-gradient(90deg, #0ea5e9, #3b82f6)'}"></div></div>
+            </div>
+            <div class="pain-point-pct">{{ p.percentage }}%</div>
+          </div>
+        </div>
+      </div>
+
+      <div v-if="seedResult.imageInsights && seedResult.imageInsights.findings" class="card">
+        <div class="card-header"><div class="card-title"><span class="emoji">🖼️</span>买家晒图视觉洞察</div></div>
+        <div class="insight-gallery">
+          <img v-for="img in projectImages" :src="img" :key="img" @error="e => e.target.style.display='none'">
+        </div>
+        <div class="insight-list">
+          <div v-for="f in seedResult.imageInsights.findings" class="insight-item">
+            <span class="insight-badge" :class="'badge-' + f.type">{{ typeLabel(f.type) }}</span>
+            <div><div class="insight-label">{{ f.label }}</div><div class="insight-detail">{{ f.detail }}</div></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="emoji">📝</span>重构爆款文案</div></div>
+        <div class="cw-title-box">
+          <div class="cw-title-label">重构标题</div>
+          <div class="cw-title-text">{{ seedResult.copywriting.title }}</div>
+        </div>
+        <div class="cw-sp-list">
+          <div v-for="(sp, i) in seedResult.copywriting.sellingPoints" class="cw-sp-item">
+            <div class="cw-sp-num">{{ i + 1 }}</div><div class="cw-sp-text">{{ sp }}</div>
+          </div>
+        </div>
+        <div class="cw-desc">{{ seedResult.copywriting.description }}</div>
+      </div>
+
+      <div class="card">
+        <div class="card-header"><div class="card-title"><span class="emoji">🎨</span>生图提示词（中文）</div></div>
+        <div class="prompt-box">{{ seedResult.imagePrompt }}</div>
+      </div>
+    </template>
+
+    <div v-else class="empty-state" style="padding-top:120px">
+      该项目还没有 Seed 2.1 的分析结果<br>点击右上角「开始 Seed 2.1 分析」运行实验
+    </div>
+  </div>
+</div>
+
+<script>
+const { createApp, ref, onMounted } = Vue;
+createApp({
+  setup() {
+    const projects = ref([]);
+    const selectedId = ref(null);
+    const selectedProject = ref(null);
+    const projectImages = ref([]);
+    const apiKey = ref(localStorage.getItem('ark_api_key') || '');
+    const seedModel = ref(localStorage.getItem('seed_model') || 'doubao-seed-2-1-pro-260628');
+    const customModel = ref(localStorage.getItem('seed_custom_model') || '');
+    const currentModel = Vue.computed(() => seedModel.value === '__custom__' ? (customModel.value || '未填写') : seedModel.value);
+    const analyzing = ref(false);
+    const errorMsg = ref('');
+    const seedResult = ref(null);
+    const stats = ref({ seconds: 0, tokens: 0, promptTokens: 0, completionTokens: 0, cost: 0 });
+
+    async function loadProjects() {
+      const res = await fetch('/api/projects');
+      const data = await res.json();
+      projects.value = (data.projects || []).map(p => ({
+        ...p,
+        hasAnalysis: !!p.hasAnalysis,
+        hasSeed: !!p.hasSeed
+      }));
+    }
+
+    async function selectProject(p) {
+      selectedId.value = p.id;
+      selectedProject.value = p;
+      errorMsg.value = '';
+      seedResult.value = null;
+      try {
+        const res = await fetch(`/api/project/${p.id}`);
+        const detail = await res.json();
+        projectImages.value = detail.images || [];
+        if (detail.seedResult) {
+          seedResult.value = detail.seedResult.result;
+        }
+      } catch (e) { console.error(e); }
+    }
+
+    async function analyze() {
+      if (!selectedId.value) return;
+      if (!apiKey.value) { errorMsg.value = '请先在左侧填入火山方舟 API Key'; return; }
+      localStorage.setItem('ark_api_key', apiKey.value);
+      localStorage.setItem('seed_model', seedModel.value);
+      localStorage.setItem('seed_custom_model', customModel.value);
+      const model = seedModel.value === '__custom__' ? customModel.value.trim() : seedModel.value;
+      if (!model) { errorMsg.value = '请填写自定义模型 ID'; return; }
+      analyzing.value = true;
+      errorMsg.value = '';
+      try {
+        const res = await fetch('/api/analyze-seed', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ projectId: selectedId.value, apiKey: apiKey.value, seedModel: model })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) throw new Error(data.error || '分析失败');
+        seedResult.value = data.result;
+        stats.value = data.stats;
+        selectedProject.value.hasSeed = true;
+        await loadProjects();
+      } catch (e) {
+        errorMsg.value = e.message;
+      } finally {
+        analyzing.value = false;
+      }
+    }
+
+    function typeLabel(type) {
+      return { defect: '缺陷', positive: '正面', scene: '场景' }[type] || type;
+    }
+
+    onMounted(loadProjects);
+    return { projects, selectedId, selectedProject, projectImages, apiKey, seedModel, customModel, currentModel, analyzing, errorMsg, seedResult, stats, selectProject, analyze, typeLabel };
+  }
+}).mount('#app');
+</script>
+</body>
+</html>
