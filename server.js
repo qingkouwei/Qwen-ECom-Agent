@@ -51,6 +51,33 @@ function saveProjectsToDisk() {
 
 loadProjectsFromDisk();
 
+// ============================================================
+//  结构化统计日志：每次调用写入 logs/app.log（JSON 行格式），不展示到前端
+// ============================================================
+const logDir = path.join(__dirname, 'logs');
+if (!fs.existsSync(logDir)) fs.mkdirSync(logDir);
+const logFile = path.join(logDir, 'app.log');
+
+function logStat(entry) {
+  const record = {
+    ts: new Date().toISOString(),
+    ...entry
+  };
+  // 控制台输出关键字段，完整 JSON 落盘
+  const { type, action, seconds, tokens, cost, status } = record;
+  console.log(`📊 [${type}] ${action || ''} ${status || ''} ${seconds != null ? seconds + 's' : ''} ${tokens ? tokens + 'tokens' : ''} ${cost ? '¥' + cost : ''}`.trim());
+  try {
+    fs.appendFileSync(logFile, JSON.stringify(record) + '\n', 'utf-8');
+  } catch (e) {
+    console.error('写入统计日志失败:', e.message);
+  }
+}
+
+// 按 Qwen3.8-Max 定价估算成本：输入 ¥12/M tokens，输出 ¥36/M tokens
+function calcCost(promptTokens, completionTokens) {
+  return Math.round((promptTokens * 12 + completionTokens * 36) / 1e6 * 100) / 100;
+}
+
 // multer 配置
 const storage = multer.diskStorage({
   destination: uploadDir,
@@ -69,6 +96,7 @@ const upload = multer({ storage, fileFilter: (req, file, cb) => {
 //  文件上传接口
 // ============================================================
 app.post('/api/upload', upload.single('file'), async (req, res) => {
+  const uploadStartedAt = Date.now();
   try {
     if (!req.file) return res.status(400).json({ error: '请上传文件' });
 
@@ -109,6 +137,13 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     projects.set(projectId, project);
     saveProjectsToDisk();
 
+    logStat({
+      type: 'upload', action: '文件上传解析', status: 'success',
+      project: project.name, projectId,
+      reviewCount: reviews.length, imageCount: images.length,
+      seconds: Math.round((Date.now() - uploadStartedAt) / 100) / 10
+    });
+
     res.json({
       success: true,
       project: {
@@ -121,6 +156,7 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
     });
   } catch (err) {
     console.error('上传解析失败:', err);
+    logStat({ type: 'upload', action: '文件上传解析', status: 'fail', error: err.message, seconds: Math.round((Date.now() - uploadStartedAt) / 100) / 10 });
     res.status(500).json({ error: '文件解析失败: ' + err.message });
   }
 });
@@ -129,6 +165,8 @@ app.post('/api/upload', upload.single('file'), async (req, res) => {
 //  大模型分析接口 — 调用 Qwen3.8-Max（原生多模态旗舰，文本+图像一次调用完成）
 // ============================================================
 app.post('/api/analyze', async (req, res) => {
+  const analyzeStartedAt = Date.now();
+  let logCtx = {};
   try {
     const { projectId, apiKey } = req.body;
     const project = projects.get(projectId);
@@ -210,12 +248,14 @@ ${imageUrls.length ? '\n【买家晒图】见附带的图片，请严格按照�
     }
 
     let response;
+    let degraded = false;
     try {
       response = await callQwen();
     } catch (mmErr) {
       // 晒图链接失效导致多模态调用失败时，降级为纯文本分析保证主流程可用
       if (imageUrls.length > 0) {
         console.warn('多模态调用失败，降级为纯文本分析:', mmErr.response?.data?.error?.message || mmErr.message);
+        degraded = true;
         response = await axios.post(chatEndpoint, {
           model: 'qwen3.8-max',
           messages: [
@@ -250,9 +290,34 @@ ${imageUrls.length ? '\n【买家晒图】见附带的图片，请严格按照�
 
     project.analysisResult = analysisResult;
     saveProjectsToDisk();
+
+    // 记录分析调用统计：耗时、token 用量、成本估算
+    const usage = response.data.usage || {};
+    const seconds = Math.round((Date.now() - analyzeStartedAt) / 100) / 10;
+    const cost = calcCost(usage.prompt_tokens || 0, usage.completion_tokens || 0);
+    logCtx = { project: project.name, projectId, reviewCount: project.reviews.length };
+    logStat({
+      type: 'analyze', action: 'Qwen3.8-Max 全维分析', status: 'success',
+      ...logCtx,
+      multimodal: imageUrls.length > 0 && !degraded,
+      imageCount: imageUrls.length,
+      degraded,
+      seconds,
+      promptTokens: usage.prompt_tokens || 0,
+      completionTokens: usage.completion_tokens || 0,
+      tokens: usage.total_tokens || 0,
+      cost
+    });
+
     res.json({ success: true, result: analysisResult });
   } catch (err) {
     console.error('分析失败:', err.response?.data || err.message);
+    logStat({
+      type: 'analyze', action: 'Qwen3.8-Max 全维分析', status: 'fail',
+      ...logCtx,
+      error: err.response?.data?.error?.message || err.message,
+      seconds: Math.round((Date.now() - analyzeStartedAt) / 100) / 10
+    });
     const errMsg = err.response?.data?.error?.message || err.message;
     res.status(500).json({ error: '分析调用失败: ' + errMsg });
   }
@@ -262,6 +327,8 @@ ${imageUrls.length ? '\n【买家晒图】见附带的图片，请严格按照�
 //  通义万相生图接口
 // ============================================================
 app.post('/api/generate-image', async (req, res) => {
+  const genStartedAt = Date.now();
+  let logCtx = {};
   try {
     const { projectId, apiKey, prompt } = req.body;
     const project = projects.get(projectId);
@@ -271,6 +338,7 @@ app.post('/api/generate-image', async (req, res) => {
     if (!key) return res.status(400).json({ error: '未配置 API Key' });
 
     const imagePrompt = prompt || project.analysisResult?.imagePrompt || '高品质电商商品主图，白色背景，专业产品摄影';
+    logCtx = { project: project.name, projectId };
 
     // 第一步：提交生图任务
     const submitRes = await axios.post(
@@ -337,9 +405,25 @@ app.post('/api/generate-image', async (req, res) => {
 
     project.generatedImage = imageUrl;
     saveProjectsToDisk();
+
+    // 记录生图调用统计：总耗时（含任务轮询）、提示词长度
+    logStat({
+      type: 'generate-image', action: '通义万相生图', status: 'success',
+      ...logCtx,
+      seconds: Math.round((Date.now() - genStartedAt) / 100) / 10,
+      promptLength: imagePrompt.length,
+      storedAs: imageUrl
+    });
+
     res.json({ success: true, imageUrl });
   } catch (err) {
     console.error('生图失败:', err.response?.data || err.message);
+    logStat({
+      type: 'generate-image', action: '通义万相生图', status: 'fail',
+      ...logCtx,
+      error: err.response?.data?.message || err.message,
+      seconds: Math.round((Date.now() - genStartedAt) / 100) / 10
+    });
     const errMsg = err.response?.data?.message || err.message;
     res.status(500).json({ error: '生图失败: ' + errMsg });
   }
@@ -400,5 +484,7 @@ app.get('*', (req, res) => {
 
 app.listen(PORT, () => {
   console.log(`\n🚀 电商竞品爆款全维拆解与重构助手已启动`);
-  console.log(`📡 访问地址: http://localhost:${PORT}\n`);
+  console.log(`📡 访问地址: http://localhost:${PORT}`);
+  console.log(`📊 统计日志文件: ${logFile}\n`);
+  logStat({ type: 'system', action: '服务启动', status: 'success', projectCount: projects.size });
 });
